@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Article</title>
+    <style>
+        * { 
+            box-sizing: border-box; 
+        }
+        html, body { 
+            height: 100%; 
+            margin: 0; 
+            padding: 0; 
+            overflow: hidden; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background-color: #f4f7f6; 
+            color: #333;
+        }
+        .workspace { 
+            display: flex; 
+            flex-direction: row; 
+            height: 100vh; 
+            width: 100vw; 
+            gap: 16px; 
+            padding: 16px; 
+        }
+        .panel { 
+            flex: 1; 
+            display: flex; 
+            flex-direction: column; 
+            height: 100%; 
+            background: #fff; 
+            padding: 16px; 
+            border-radius: 8px; 
+            box-shadow: 0 4px 10px rgba(0,0,0,0.05); 
+            overflow: hidden;
+        }
+        label { 
+            font-weight: bold; 
+            display: block; 
+            margin-bottom: 10px; 
+            font-size: 14px;
+            color: #222;
+        }
+        textarea { 
+            flex: 1; 
+            width: 100%; 
+            padding: 12px; 
+            border: 1px solid #ccc; 
+            border-radius: 5px; 
+            font-family: monospace; 
+            font-size: 13.5px;
+            line-height: 1.5;
+            resize: none; 
+            outline: none;
+        }
+        textarea:focus {
+            border-color: #0056b3;
+        }
+        button { 
+            width: 100%;
+            margin-top: 12px;
+            padding: 12px 20px; 
+            border: none; 
+            border-radius: 5px; 
+            cursor: pointer; 
+            font-size: 15px; 
+            font-weight: bold;
+            transition: background 0.2s;
+        }
+        .btn-copy { 
+            background: #28a745; 
+            color: #fff;
+        }
+        .btn-copy:hover { 
+            background: #218838; 
+        }
+    </style>
+</head>
+<body>
+
+    <div class="workspace">
+        <div class="panel">
+            <label for="inputHtml">Input HTML Asli:</label>
+            <textarea id="inputHtml" placeholder="Paste seluruh kode HTML artikel di sini..."></textarea>
+        </div>
+
+        <div class="panel">
+            <label for="outputHtml">Output HTML Terproses:</label>
+            <textarea id="outputHtml" readonly placeholder="Hasil HTML otomatis muncul di sini..."></textarea>
+            <button class="btn-copy" onclick="copyHasil()">Copy Hasil HTML</button>
+        </div>
+    </div>
+
+    <script>
+        // Memicu fungsi prosesArtikel secara otomatis saat ada teks yang diketik atau di-paste
+        document.getElementById('inputHtml').addEventListener('input', prosesArtikel);
+
+        function prosesArtikel() {
+            const input = document.getElementById('inputHtml').value;
+            const outputTextarea = document.getElementById('outputHtml');
+            
+            // Jika kotak kiri kosong, kosongkan juga kotak kanan secara diam-diam
+            if (!input.trim()) {
+                outputTextarea.value = '';
+                return;
+            }
+
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(input, 'text/html');
+
+            // 1. Ekstrak teks alternatif dari bagian <ul> "Image Alt Text"
+            const h2Elements = Array.from(doc.querySelectorAll('h2'));
+            const altTextH2 = h2Elements.find(h2 => h2.textContent.toLowerCase().includes('image alt text'));
+            
+            const altTexts = [];
+            let altTextUl = null;
+
+            if (altTextH2) {
+                altTextUl = altTextH2.nextElementSibling;
+                if (altTextUl && altTextUl.tagName.toLowerCase() === 'ul') {
+                    const listItems = Array.from(altTextUl.querySelectorAll('li'));
+                    listItems.forEach(li => {
+                        const match = li.textContent.match(/Image \d+:\s*(.*)/i);
+                        if (match) {
+                            altTexts.push(match[1].trim());
+                        }
+                    });
+                }
+            }
+
+            // 1.5. Ekstrak Teks Judul dan tandai elemen untuk dihapus nanti
+            let postTitleText = "";
+            let pFileName = null;
+            let pPostTitle = null;
+
+            const allParagraphs = Array.from(doc.querySelectorAll('p'));
+            allParagraphs.forEach(p => {
+                if (p.textContent.toLowerCase().includes('image file name:')) {
+                    pFileName = p;
+                }
+                
+                const match = p.textContent.match(/Image post title:\s*(.*)/i);
+                if (match) {
+                    postTitleText = match[1].trim();
+                    pPostTitle = p;
+                }
+            });
+
+            // 2. Ambil bungkus div gambar dan judul H2 target (H2 1-5)
+            const separators = Array.from(doc.querySelectorAll('div.separator')).filter(div => div.querySelector('img'));
+            const targetH2s = h2Elements.filter(h2 => /^\d+\./.test(h2.textContent.trim()) && h2 !== altTextH2);
+
+            // 3. Proses pemindahan, resize, dan pengisian atribut (alt, title, imageanchor)
+            const limit = Math.min(5, separators.length, targetH2s.length);
+            for (let i = 0; i < limit; i++) {
+                const h2 = targetH2s[i];
+                const imgDiv = separators[i];
+                
+                const aTag = imgDiv.querySelector('a');
+                const img = imgDiv.querySelector('img');
+                
+                // Menambahkan atribut imageanchor ke tag <a> sesuai gaya edit manual
+                if (aTag) {
+                    aTag.setAttribute('imageanchor', '1');
+                }
+
+                if (img) {
+                    const origWidth = parseFloat(img.getAttribute('data-original-width')) || 640;
+                    const origHeight = parseFloat(img.getAttribute('data-original-height')) || 480;
+                    const newWidth = 640;
+                    // Menggunakan Math.ceil (pembulatan ke atas) agar 357.2 menjadi 358px
+                    const newHeight = Math.ceil((origHeight / origWidth) * newWidth);
+                    
+                    // Mengubah parameter URL menjadi /w640-h.../
+                    img.src = img.src.replace(/\/(s\d+|w\d+-h\d+)\//, `/w${newWidth}-h${newHeight}/`);
+                    
+                    img.setAttribute('width', newWidth);
+                    img.setAttribute('height', newHeight);
+                    
+                    if (altTexts[i]) {
+                        img.setAttribute('alt', altTexts[i]);
+                    }
+                    if (postTitleText) {
+                        img.setAttribute('title', postTitleText);
+                    }
+                }
+
+                h2.insertAdjacentElement('afterend', imgDiv);
+            }
+
+            // 4. Hapus bagian "Image Alt Text" dari DOM
+            if (altTextH2) altTextH2.remove();
+            if (altTextUl && altTextUl.tagName.toLowerCase() === 'ul') altTextUl.remove();
+
+            // 4.5. Hapus bagian "Image File Name And Post Title" dari DOM
+            const h3Elements = Array.from(doc.querySelectorAll('h3'));
+            const fileTitleH3 = h3Elements.find(h3 => h3.textContent.toLowerCase().includes('image file name and post title'));
+            
+            if (fileTitleH3) fileTitleH3.remove();
+            if (pFileName) pFileName.remove();
+            if (pPostTitle) pPostTitle.remove();
+
+            // 5. Fitur Pemisahan Paragraf Otomatis (Mengganti .<br><br> menjadi .</p><p>)
+            const remainingParagraphs = Array.from(doc.querySelectorAll('p'));
+            remainingParagraphs.forEach(p => {
+                // outerHTML memanipulasi keseluruhan tag <p>, memungkinkan kita memecahnya jadi 2 tag terpisah
+                p.outerHTML = p.outerHTML.replace(/\.\s+(?=(<[^>]+>)*[A-Z])/g, '.</p><p>');
+            });
+
+            // 6. Fitur Hapus Angka H2 Lebih Dari 5
+            const currentH2s = Array.from(doc.querySelectorAll('h2'));
+            currentH2s.forEach(h2 => {
+                const match = h2.textContent.match(/^\s*(\d+)\./);
+                if (match) {
+                    const num = parseInt(match[1], 10);
+                    if (num > 5) {
+                        h2.innerHTML = h2.innerHTML.replace(/^\s*\d+\.\s*/, '');
+                    }
+                }
+            });
+
+            outputTextarea.value = doc.body.innerHTML;
+        }
+
+        function copyHasil() {
+            const outputTextarea = document.getElementById('outputHtml');
+            if (!outputTextarea.value.trim()) return; 
+            
+            outputTextarea.select();
+            outputTextarea.setSelectionRange(0, 999999);
+            
+            navigator.clipboard.writeText(outputTextarea.value).catch(err => {
+                console.error('Gagal mengcopy kode: ', err);
+            });
+        }
+    </script>
+
+</body>
+</html>
